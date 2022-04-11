@@ -58,14 +58,24 @@ impl<K, V> Bptree<K, V>
 
     pub fn remove(&mut self, key: &K) -> Option<V> {
         self.mutex.lock();
+        if self.root.keys_len() == 0 {
+            let root = self.root.clone();
+            if let BtreeNode::inner(inner_node_arc) = root {
+                let inner_node_content = inner_node_arc.lock().unwrap();
+                let child = inner_node_content.childNodeptrs[0].clone();
+                self.root = child;
+            }
+        }
         match self.root.remove(key, None, None) {
             (None, None, None) => {return None;}
             (_, _, Some(old_val)) => {
+
                 return Some(old_val);
             }
             _ => {unreachable!()}
         }
     }
+
 
 }
 
@@ -122,6 +132,20 @@ impl<K, V> BtreeNode<K, V>
                 return inner_node_content.remove(key, left_slibing, right_slibing);
             }
             Self::placehold => {return (None, None, None);}
+        }
+    }
+
+    pub fn keys_len(&self) -> usize {
+        match self{
+            Self::leaf(leaf_node_ref) => {
+                let mut leaf_node_content = leaf_node_ref.lock().unwrap();
+                return leaf_node_content.keys.len();
+            },
+            Self::inner(inner_node_ref) => {
+                let mut inner_node_content = inner_node_ref.lock().unwrap();
+                return inner_node_content.keys.len();
+            }
+            Self::placehold => {0}
         }
     }
 }
@@ -204,6 +228,7 @@ impl<K,V> InnerNode<K,V>
     {
         let mut index = 0;
         let mut old_val;
+        let min_key = self.keys[0].clone();
         match self.keys.binary_search(key) {
             Err(i) => {index = i;}
             Ok(i) => {index = i+1;}
@@ -213,7 +238,7 @@ impl<K,V> InnerNode<K,V>
         match self.childNodeptrs[index].remove(key, left_slibing, right_slibing) {
             (Some(old_key), Some(new_key), Some(val))  => {
                 match self.keys.binary_search(&old_key) {
-                    Err(_) =>{panic!("btree struct error!")}
+                    Err(_) =>{}
                     Ok(i) =>{self.keys[i] = new_key;}
                 }
                 old_val = val;
@@ -228,12 +253,20 @@ impl<K,V> InnerNode<K,V>
                 }
                 old_val = val;
             },
-            (_, _, Some(old_val)) => {return (None,None,Some(old_val));},
-            (_, _, None) => {return (None,None,None);},
+            (None, None, Some(old_val)) => {return (None,None,Some(old_val));},
+            (None, None, None) => {return (None,None,None);},
             _ => {unreachable!()}
         }
         match self.need_merge() {
-            false => {return (None, None, Some(old_val));}
+            false => {
+                if self.keys[0] != min_key {
+                    let new_min_key = self.keys[0].clone();
+                    return (Some(min_key), Some(new_min_key), Some(old_val));
+                }
+                else{
+                    return (None, None, Some(old_val));
+                }
+            }
             true => {
                 if let Some(btree_node) = left {
                     match btree_node {
@@ -246,21 +279,16 @@ impl<K,V> InnerNode<K,V>
                                 let key = inner_node_content.keys.remove(last_index);
                                 let childptr = inner_node_content.childNodeptrs.remove(last_index);
 
-                                let old_key = self.keys[0].clone();
-
                                 self.keys.insert(0, key.clone());
                                 self.childNodeptrs.insert(1, childptr);// insert behind the placehold
-
-                                return (Some(old_key), Some(key), Some(old_val));
+                                return (Some(min_key), Some(key), Some(old_val));
                             }
                             else{
-                                let old_key = self.keys[0].clone();
-
                                 self.childNodeptrs.remove(0);//remove the placehold
                                 inner_node_content.keys.append(&mut self.keys);
                                 inner_node_content.childNodeptrs.append(&mut self.childNodeptrs);
 
-                                return (Some(old_key), None, Some(old_val));
+                                return (Some(min_key), None, Some(old_val));
                             }
                         }
                     }
@@ -415,6 +443,7 @@ impl<K, V> LeafNode<K, V>
     pub fn remove(&mut self, key:& K,  left: Option<BtreeNode<K,V>>,
                   right: Option<BtreeNode<K,V>>) -> (Option<K>, Option<K>, Option<V>) {
         let mut old_val = None;
+        let min_key = self.keys[0].clone();
         match self.keys.binary_search(key) {
             Err(_) => {return (None, None, None);},
             Ok(i) => {
@@ -422,7 +451,15 @@ impl<K, V> LeafNode<K, V>
                 old_val = Some(self.vals.remove(i));
 
                 match self.need_merge() {
-                    false => {return (None, None, old_val);}
+                    false => {
+                        if i == 0 {
+                            let new_min_key = self.keys[0].clone();
+                            return (Some(min_key), Some(new_min_key), old_val);
+                        }
+                        else{
+                            return (None, None, old_val);
+                        }
+                    }
                     true => {
                         if let Some(btree_node) = left {
                             match btree_node {

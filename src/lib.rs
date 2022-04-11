@@ -15,7 +15,7 @@ mod tests {
     impl KVType for &str {}
     #[test]
     fn it_works() {
-        let mut bt:Bptree<i32, &str> = Bptree::new(9);
+        let mut bt:Bptree<i32, &str> = Bptree::new(50);
         for i in (0..100000) {
             bt.set(i, "hello");
         }
@@ -24,7 +24,7 @@ mod tests {
         for i in (0..100000) {
 
             if let Some(res) = bt.remove(&i){
-
+                //println!("{}: removed", i);
             }
             else{
                 println!("{}: error", i);
